@@ -33,6 +33,7 @@ ENV/
 
 # Large artifacts / checkpoints / datasets
 *.pt
-backend/data/scenarios/
-*.npz
+backend/data/scenarios/*.npz
+!backend/data/scenarios/historical_sept_2025.npz
+!backend/data/scenarios/historical_2021.npz
 !backend/data/static_graph.npz
