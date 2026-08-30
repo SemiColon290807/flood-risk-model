@@ -13,12 +13,12 @@ def compute_sheet_flow_per_width(depth_m, slope, roughness=0.035, min_slope=1e-4
     depth_m = np.asarray(depth_m, dtype=np.float64)
     slope = np.asarray(slope, dtype=np.float64)
 
-    safe_depth = np.maximum(depth_m, 0.0)
-    safe_slope = np.maximum(slope, min_slope)
+    safe_depth = np.clip(depth_m, 0.0, 4.0)
+    safe_slope = np.clip(slope, min_slope, 0.10)
 
     return (1.0 / roughness) * (safe_depth ** (5.0 / 3.0)) * (safe_slope ** 0.5)
 
-    #Here Area= depth, and hydraulic radius is also equal to depth. Check Derivation
+    #Here Area= depth, and hydraulic radius is also equal to depth. Check Derivation.
 
 def compute_water_surface_elevation(ground_elevation_m, water_depth_m):
 
