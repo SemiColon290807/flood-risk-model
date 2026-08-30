@@ -171,6 +171,65 @@ def generate_lhs_scenarios(n_scenarios: int = 200, seed: int = 42) -> List[Scena
     return scenarios
 
 
+def generate_transition_lhs_scenarios(
+    n_scenarios: int = 60,
+    intensity_range: Tuple[float, float] = (30.0, 70.0),
+    duration_range: Tuple[float, float] = (30.0, 180.0),
+    peak_ratio_range: Tuple[float, float] = (0.20, 0.60),
+    decay_range: Tuple[float, float] = (0.40, 0.80),
+    seed: int = 9999,
+) -> List[ScenarioParams]:
+    """
+    Generates LHS scenarios targeted specifically at the 30-70 mm/hr transition band
+    with uniform (unskewed) sampling to densify the flooding boundary dataset.
+    """
+    rng = np.random.default_rng(seed)
+
+    perm_i = rng.permutation(n_scenarios)
+    perm_dur = rng.permutation(n_scenarios)
+    perm_r = rng.permutation(n_scenarios)
+    perm_n = rng.permutation(n_scenarios)
+
+    scenarios = []
+    for k in range(n_scenarios):
+        sc_id = f"lhs_transition_{k+1:03d}"
+
+        u_i = (perm_i[k] + rng.uniform(0.0, 1.0)) / n_scenarios
+        u_dur = (perm_dur[k] + rng.uniform(0.0, 1.0)) / n_scenarios
+        u_r = (perm_r[k] + rng.uniform(0.0, 1.0)) / n_scenarios
+        u_n = (perm_n[k] + rng.uniform(0.0, 1.0)) / n_scenarios
+
+        # Uniform sampling within 30-70 mm/hr (no skew)
+        i_peak = intensity_range[0] + u_i * (intensity_range[1] - intensity_range[0])
+        dur = duration_range[0] + u_dur * (duration_range[1] - duration_range[0])
+        r = peak_ratio_range[0] + u_r * (peak_ratio_range[1] - peak_ratio_range[0])
+        n = decay_range[0] + u_n * (decay_range[1] - decay_range[0])
+
+        t_min, i_series, tot_depth = chicago_hyetograph(
+            duration_min=dur,
+            peak_intensity_mm_hr=i_peak,
+            peak_timing_ratio=r,
+            decay_exponent=n,
+            dt_min=0.5
+        )
+
+        sc = ScenarioParams(
+            scenario_id=sc_id,
+            source="synthetic_lhs",
+            peak_intensity_mm_hr=round(i_peak, 2),
+            duration_min=round(dur, 1),
+            peak_timing_ratio=round(r, 3),
+            decay_exponent=round(n, 3),
+            total_depth_mm=round(tot_depth, 2),
+            times_min=t_min,
+            intensity_mm_hr=i_series,
+            metadata={"sampling": "transition_latin_hypercube", "target_band": "30-70mm_hr"}
+        )
+        scenarios.append(sc)
+
+    return scenarios
+
+
 def build_historical_scenarios() -> List[ScenarioParams]:
     """
     Builds the two documented historical storm replay scenarios for validation/testing.

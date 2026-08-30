@@ -59,9 +59,28 @@ def compute_lateral_transfer_batch(elevations, depths, areas, idx_i, idx_j, dist
     area_j = areas[j_f]
     equalize_vols = abs_delta_f / ((1.0 / area_i) + (1.0 / area_j))
 
-    capped_vols = np.minimum(raw_vols, equalize_vols)
-    signed_vols[mask_flow] = np.where(delta_f > 0, capped_vols, -capped_vols)
+    # Single-pair WSE equalization cap
+    requested_vols = np.minimum(raw_vols, equalize_vols)
 
+    # ── Proportional Flux Limiter (Multi-Edge Outflow Coordination) ──
+    # Determine the source (upstream) cell for each active edge
+    source_cells = np.where(delta_f > 0, i_f, j_f)
+    num_cells = len(depths)
+
+    # Sum total requested outflow across ALL outgoing edges for each source cell
+    total_requested_outflow = np.bincount(source_cells, weights=requested_vols, minlength=num_cells)
+    available_vols = 1.00 * depths * areas  # 100% of cell water volume is physically available for drainage
+
+    # Compute cell-level scaling factor: scale = min(1.0, available / total_requested)
+    scale_factors = np.ones(num_cells, dtype=np.float64)
+    over_capacity = total_requested_outflow > available_vols
+    scale_factors[over_capacity] = available_vols[over_capacity] / (total_requested_outflow[over_capacity] + 1e-12)
+
+    # Scale every outgoing edge transfer by its source cell's coordinate scale factor
+    edge_scale = scale_factors[source_cells]
+    final_vols = requested_vols * edge_scale
+
+    signed_vols[mask_flow] = np.where(delta_f > 0, final_vols, -final_vols)
     return signed_vols
 
 

@@ -31,9 +31,20 @@ ENV/
 .vscode/
 .idea/
 
+# Node / Frontend
+node_modules/
+frontend/node_modules/
+dist/
+frontend/dist/
+
 # Large artifacts / checkpoints / datasets
 *.pt
+!backend/gnn/flood_gcn_checkpoint.pt
 backend/data/scenarios/*.npz
 !backend/data/scenarios/historical_sept_2025.npz
 !backend/data/scenarios/historical_2021.npz
 !backend/data/static_graph.npz
+
+# Scratch / diagnostic test scripts
+diag_inv_*.py
+test_min*.py
