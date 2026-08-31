@@ -18,7 +18,7 @@ from graph_builder import build_drainage_graph
 from surface_grid import build_surface_grid
 from kinematic_sim import VectorizedSimulationEngine
 from manning_capacity import compute_pipe_capacity
-from generate_scenarios import generate_lhs_scenarios, build_historical_scenarios, resample_to_simulator_dt, ScenarioParams
+from generate_scenarios import generate_lhs_scenarios, generate_transition_lhs_scenarios, build_historical_scenarios, resample_to_simulator_dt, ScenarioParams
 
 
 def save_static_graph(drainage: dict, grid: dict, output_path: str = "../data/static_graph.npz"):
@@ -117,19 +117,20 @@ def run_scenario(
 
 
 def run_batch_pipeline(
-    n_lhs: int = 50,
+    n_lhs: int = 200,
+    n_trans: int = 60,
     out_dir: str = "../data/scenarios",
     static_graph_path: str = "../data/static_graph.npz",
     sim_dt_sec: float = 10.0,
     sample_dt_sec: float = 30.0,
 ):
     """
-    Main batch generation pipeline.
+    Main batch generation pipeline for full 262-scenario dataset.
     """
     os.makedirs(out_dir, exist_ok=True)
 
     print("=" * 70)
-    print("  HYDRODYNAMIC BATCH SIMULATION RUNNER")
+    print("  HYDRODYNAMIC BATCH SIMULATION RUNNER (262 SCENARIOS)")
     print("=" * 70)
 
     # 1. Build Geospatial Infrastructure
@@ -143,10 +144,11 @@ def run_batch_pipeline(
     save_static_graph(drainage, grid, static_graph_path)
 
     # 3. Generate Scenario Hyetographs
-    print(f"\n── 2. Generating Scenario Hyetographs ({n_lhs} LHS + 2 Historical) ──")
+    print(f"\n── 2. Generating Scenario Hyetographs ({n_lhs} LHS + {n_trans} Transition + 2 Historical) ──")
     lhs_scenarios = generate_lhs_scenarios(n_scenarios=n_lhs, seed=42)
+    trans_scenarios = generate_transition_lhs_scenarios(n_scenarios=n_trans, seed=9999)
     hist_scenarios = build_historical_scenarios()
-    all_scenarios = lhs_scenarios + hist_scenarios
+    all_scenarios = lhs_scenarios + trans_scenarios + hist_scenarios
 
     print(f"Total scenarios to simulate: {len(all_scenarios)}")
 

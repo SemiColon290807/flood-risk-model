@@ -20,7 +20,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from model import FloodGCN, NUM_NODE_FEATURES
+from model import FloodGCN, NUM_NODE_FEATURES, NODE_FEATURE_NAMES
 from dataset import create_scenario_splits, StaticGraph, FastFloodDataset
 
 
@@ -79,6 +79,21 @@ def train_flood_gcn(
         static_graph.edge_index, static_graph.edge_weight, N, batch_size, device
     )
 
+    # Extract normalization statistics from train_ds (computed strictly across training scenarios)
+    norm_mean = train_ds.norm_mean
+    norm_std = train_ds.norm_std
+
+    # Save normalization stats to disk alongside checkpoint
+    checkpoint_dir = os.path.dirname(checkpoint_path) or "."
+    norm_stats_path = os.path.join(checkpoint_dir, "norm_stats.npz")
+    np.savez_compressed(
+        norm_stats_path,
+        mean=norm_mean.cpu().numpy().astype(np.float32),
+        std=norm_std.cpu().numpy().astype(np.float32),
+        feature_names=NODE_FEATURE_NAMES
+    )
+    print(f"✅ Saved normalization statistics -> {norm_stats_path}")
+
     n_train_seq = len(train_ds.seq_indices)
     n_val_seq = len(val_ds.seq_indices)
 
@@ -88,10 +103,14 @@ def train_flood_gcn(
     train_losses = []
     val_losses = []
 
+    norm_mean_dev = norm_mean.to(device)
+    norm_std_dev = norm_std.to(device)
+
     print("\n" + "=" * 70)
     print(f"  TRAINING PLAIN FloodGCN SURROGATE ({epochs} EPOCHS)")
     print(f"  Curriculum:         1-Step (Ep 1-2) -> 3-Step (Ep 3-4) -> 5-Step (Ep 5-6) -> 10-Step (Ep 7-8) -> 15-Step (Ep 9-10)")
     print(f"  Loss Function:      {'Severity-Weighted Loss (15x depth, 30x delta)' if use_weighted_loss else 'Standard MSE'}")
+    print(f"  Normalization:      Z-Score Standardization across 8 Features (Training-set only)")
     print(f"  Training Scenarios: {len(train_ds.scenarios)} LHS files ({len(train_ds.indices):,} transitions)")
     print(f"  Validation Scenarios:{len(val_ds.scenarios)} LHS files ({len(val_ds.indices):,} transitions)")
     print(f"  Batch Size:         {batch_size} ({batch_size * N:,} nodes / step)")
@@ -103,17 +122,11 @@ def train_flood_gcn(
     val_steps = 40
 
     for epoch in range(1, epochs + 1):
-        # Curriculum: increase unrolled rollout steps K
-        if epoch <= 2:
-            unroll_steps = 1
-        elif epoch <= 4:
-            unroll_steps = 3
-        elif epoch <= 6:
-            unroll_steps = 5
-        elif epoch <= 8:
-            unroll_steps = 10
-        else:
-            unroll_steps = 15
+        if epoch <= 2: unroll_steps = 1
+        elif epoch <= 4: unroll_steps = 3
+        elif epoch <= 6: unroll_steps = 5
+        elif epoch <= 8: unroll_steps = 10
+        else: unroll_steps = 15
 
         model.train()
         np.random.shuffle(train_seq_indices)
@@ -142,22 +155,32 @@ def train_flood_gcn(
                 stored_k = batch_data["stored_seq"][k].to(device)
                 rain_k = batch_data["rain_seq"][k].to(device)
                 cum_rain_k = batch_data["cum_rain_seq"][k].to(device)
+                ema_rain_k = batch_data["ema_rain_seq"][k].to(device)
                 target_delta_k = batch_data["target_deltas"][k].to(device)
 
-                # Assemble 8D feature vector:
-                # [depth_m, stored_vol, rain_rate, elev, bfrac, blockage, area, cum_rain]
-                x_k = torch.cat([
-                    cur_depth,
-                    stored_k,
+                # Apply log1p transform to heavy-tailed non-negative features
+                cur_depth_log = torch.log1p(cur_depth)
+                stored_k_log = torch.log1p(stored_k)
+                cum_rain_k_log = torch.log1p(cum_rain_k)
+
+                # Assemble 9D raw feature vector:
+                # [depth_m (log1p), stored_vol (log1p), rain_rate, elev, bfrac, blockage, area, cum_rain (log1p), ema_rain]
+                x_k_raw = torch.cat([
+                    cur_depth_log,
+                    stored_k_log,
                     rain_k,
                     elev,
                     bfrac,
                     blockage,
                     area,
-                    cum_rain_k
+                    cum_rain_k_log,
+                    ema_rain_k
                 ], dim=1)
 
-                pred_delta_cm = model(x_k, edge_index_b, edge_weight=edge_weight_b)
+                # Z-score standardization: (x - mean) / (std + eps)
+                x_k_norm = (x_k_raw - norm_mean_dev) / (norm_std_dev + 1e-6)
+
+                pred_delta_cm = model(x_k_norm, edge_index_b, edge_weight=edge_weight_b)
 
                 if use_weighted_loss:
                     step_loss = criterion(pred_delta_cm, target_delta_k, cur_depth)
@@ -167,7 +190,6 @@ def train_flood_gcn(
                 rollout_loss += discount * step_loss
                 discount *= 0.90
 
-                # Autoregressive recursive state update for next unrolled step
                 pred_delta_m = pred_delta_cm / 100.0
                 cur_depth = torch.clamp(cur_depth + pred_delta_m, min=0.0)
 
@@ -182,7 +204,6 @@ def train_flood_gcn(
         avg_train_loss = total_train_loss / max(1, n_train_batches)
         train_losses.append(avg_train_loss)
 
-        # Validation Pass (Single Step + Severity Breakdown)
         model.eval()
         total_val_loss = 0.0
         n_val_batches = 0
@@ -191,14 +212,12 @@ def train_flood_gcn(
         with torch.no_grad():
             for v_i in range(val_steps):
                 start_idx = v_i * batch_size
-                if start_idx + batch_size > len(val_ds.indices):
-                    break
+                if start_idx + batch_size > len(val_ds.indices): break
                 b_inds = list(range(start_idx, start_idx + batch_size))
                 x_b, y_b, depth_b = val_ds.get_batch(b_inds)
                 x_b, y_b, depth_b = x_b.to(device), y_b.to(device), depth_b.to(device)
 
                 pred_delta = model(x_b, edge_index_b, edge_weight=edge_weight_b)
-
                 if use_weighted_loss:
                     val_loss = criterion(pred_delta, y_b, depth_b)
                 else:
@@ -207,10 +226,8 @@ def train_flood_gcn(
                 total_val_loss += val_loss.item()
                 n_val_batches += 1
 
-                # Severity breakdown
                 diff_sq = (pred_delta - y_b) ** 2
                 depths_cm = depth_b * 100.0
-
                 m_safe = depths_cm < 5.0
                 m_minor = (depths_cm >= 5.0) & (depths_cm < 15.0)
                 m_mod = (depths_cm >= 15.0) & (depths_cm < 30.0)
@@ -244,14 +261,29 @@ def evaluate_historical_event(
     model: FloodGCN,
     scenario_npz_path: str,
     static_graph: StaticGraph,
+    norm_mean: Optional[torch.Tensor] = None,
+    norm_std: Optional[torch.Tensor] = None,
     device: str = "cpu"
 ) -> dict:
     """
-    Performs full closed-loop multi-step autoregressive rollout on a historical storm.
+    Performs full closed-loop multi-step autoregressive rollout on a historical storm with 9-feature log1p pipeline.
     """
     if not os.path.exists(scenario_npz_path):
         print(f"Scenario not found: {scenario_npz_path}")
         return None
+
+    if norm_mean is None or norm_std is None:
+        norm_stats_path = os.path.join(os.path.dirname(__file__), "norm_stats.npz")
+        if os.path.exists(norm_stats_path):
+            ns = np.load(norm_stats_path)
+            norm_mean = torch.tensor(ns["mean"], dtype=torch.float32)
+            norm_std = torch.tensor(ns["std"], dtype=torch.float32)
+        else:
+            norm_mean = torch.zeros(NUM_NODE_FEATURES, dtype=torch.float32)
+            norm_std = torch.ones(NUM_NODE_FEATURES, dtype=torch.float32)
+
+    norm_mean_dev = norm_mean.to(device)
+    norm_std_dev = norm_std.to(device)
 
     npz = np.load(scenario_npz_path)
     sc_id = str(npz["scenario_id"])
@@ -260,10 +292,8 @@ def evaluate_historical_event(
     rainfall_rates = npz["rainfall_mm_hr"] # [T]
 
     T, N = depth_m_true.shape
-
     edge_index = static_graph.edge_index.to(device)
     edge_weight = static_graph.edge_weight.to(device)
-
     static_elev = static_graph.elevations.to(device)
     static_bfrac = static_graph.building_fracs.to(device)
     static_area = static_graph.effective_areas.to(device)
@@ -271,9 +301,13 @@ def evaluate_historical_event(
 
     cur_depth_m = torch.tensor(depth_m_true[0:1].T, dtype=torch.float32).to(device)
     cum_rain_val = torch.zeros_like(cur_depth_m)
+    ema_rain_val = torch.full_like(cur_depth_m, fill_value=float(rainfall_rates[0]))
+
+    alpha = 0.033
 
     predicted_depths_cm = [(cur_depth_m.cpu().numpy() * 100.0)]
     latencies = []
+    deltas_step_cm = []
 
     model.eval()
     model.to(device)
@@ -281,37 +315,49 @@ def evaluate_historical_event(
     with torch.no_grad():
         for t in range(T - 1):
             t0 = time.time()
-
+            rain_val = float(rainfall_rates[t])
             stored_t = torch.tensor(stored_vol[t:t+1].T, dtype=torch.float32).to(device)
-            rain_t = torch.full_like(cur_depth_m, fill_value=float(rainfall_rates[t]))
+            rain_t = torch.full_like(cur_depth_m, fill_value=rain_val)
             
             # Update cumulative rain (dt = 30s)
             cum_rain_val += rain_t * (30.0 / 3600.0)
+            
+            # Update EMA rain (decaying memory)
+            if t == 0:
+                ema_rain_val = rain_t.clone()
+            else:
+                ema_rain_val = alpha * rain_t + (1.0 - alpha) * ema_rain_val
 
-            x_t = torch.cat([
-                cur_depth_m,
-                stored_t,
+            cur_depth_log = torch.log1p(cur_depth_m)
+            stored_t_log = torch.log1p(stored_t)
+            cum_rain_log = torch.log1p(cum_rain_val)
+
+            x_t_raw = torch.cat([
+                cur_depth_log,
+                stored_t_log,
                 rain_t,
                 static_elev,
                 static_bfrac,
                 static_blockage,
                 static_area,
-                cum_rain_val
+                cum_rain_log,
+                ema_rain_val
             ], dim=1)
 
-            pred_delta_cm = model(x_t, edge_index, edge_weight=edge_weight)
-            pred_delta_m = pred_delta_cm / 100.0
+            x_t_norm = (x_t_raw - norm_mean_dev) / (norm_std_dev + 1e-6)
 
+            pred_delta_cm = model(x_t_norm, edge_index, edge_weight=edge_weight)
+            deltas_step_cm.append(pred_delta_cm.cpu().numpy())
+
+            pred_delta_m = pred_delta_cm / 100.0
             next_depth_m = torch.clamp(cur_depth_m + pred_delta_m, min=0.0)
 
             latencies.append((time.time() - t0) * 1000.0)
             predicted_depths_cm.append(next_depth_m.cpu().numpy() * 100.0)
-
             cur_depth_m = next_depth_m
 
-    pred_depths_cm = np.array(predicted_depths_cm) # [T, N, 1]
+    pred_depths_cm = np.array(predicted_depths_cm)
     true_depths_cm = depth_m_true[:, :, np.newaxis] * 100.0
-
     rmse_cm = float(np.sqrt(np.mean((pred_depths_cm - true_depths_cm) ** 2)))
     peak_true = float(np.max(true_depths_cm))
     peak_pred = float(np.max(pred_depths_cm))
@@ -327,18 +373,27 @@ def evaluate_historical_event(
     r2 = float(1.0 - (ss_res / (ss_tot + 1e-6)))
     avg_latency = float(np.mean(latencies))
 
+    # Receding limb audit (sign check during zero rainfall period)
+    deltas_all = np.array(deltas_step_cm) # [T-1, N, 1]
+    mid_step = int(len(rainfall_rates) * 0.5)
+    mean_delta_rising = float(np.mean(deltas_all[:mid_step]))
+    mean_delta_receding = float(np.mean(deltas_all[mid_step:]))
+
     print("\n" + "=" * 65)
     print(f"  HISTORICAL REPLAY EVALUATION: {sc_id}")
     print("=" * 65)
     print(f"  Duration:                  {T * 0.5:.1f} mins ({T} timesteps)")
     print(f"  Overall RMSE:              {rmse_cm:.2f} cm")
-    print(f"  Nash-Sutcliffe R²:         {r2:.4f}")
+    print(f"  Nash-Sutcliffe R² (NSE):   {r2:.4f}")
     print(f"  Overall Peak Ground Truth: {peak_true:.1f} cm ({peak_true/100:.2f} m)")
     print(f"  Overall Peak GNN Predicted:{peak_pred:.1f} cm ({peak_pred/100:.2f} m)")
     print(f"  Worst Node (Node {worst_node}):")
     print(f"    - Actual Simulator Peak: {worst_node_true_peak:.1f} cm ({worst_node_true_peak/100:.2f} m)")
     print(f"    - FloodGCN Predicted:    {worst_node_pred_peak:.1f} cm ({worst_node_pred_peak/100:.2f} m)")
     print(f"    - Residual Error Gap:    {abs(worst_node_true_peak - worst_node_pred_peak):.1f} cm")
+    print(f"  Hydrograph Derivative Sign Audit:")
+    print(f"    - Rising Limb Mean Δy:   {mean_delta_rising:+.5f} cm/step")
+    print(f"    - Receding Limb Mean Δy: {mean_delta_receding:+.5f} cm/step ({'CORRECT (Negative / Draining)' if mean_delta_receding < 0 else 'INCORRECT (Positive Accumulation)'})")
     print(f"  Inference Latency:         {avg_latency:.2f} ms / step")
     print("=" * 65)
 

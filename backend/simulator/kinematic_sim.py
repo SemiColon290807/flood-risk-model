@@ -63,6 +63,30 @@ class VectorizedSimulationEngine:
         for p_idx, u in enumerate(self.from_nodes):
             self.outgoing_pipes[u].append(p_idx)
 
+        # ── True Terminal Outfall vs. Interior Dead-End Classification ──
+        # Heuristic based on network bounding-box position (5% border buffer):
+        # Nodes with 0 outgoing pipes at the spatial boundary of the domain represent
+        # legitimate outfalls to regional canals/rivers and discharge freely.
+        # Zero-outdegree nodes in the interior are dead-end junctions with no downhill
+        # pipe connection and must surcharge 100% of incoming water back to their host surface cell.
+        if "eastings" in drainage_graph and "northings" in drainage_graph:
+            eastings = np.array(drainage_graph["eastings"], dtype=np.float64)
+            northings = np.array(drainage_graph["northings"], dtype=np.float64)
+            min_e, max_e = np.min(eastings), np.max(eastings)
+            min_n, max_n = np.min(northings), np.max(northings)
+            e_range = max(max_e - min_e, 1.0)
+            n_range = max(max_n - min_n, 1.0)
+            rel_e = (eastings - min_e) / e_range
+            rel_n = (northings - min_n) / n_range
+            is_boundary = (rel_e < 0.05) | (rel_e > 0.95) | (rel_n < 0.05) | (rel_n > 0.95)
+        else:
+            is_boundary = np.zeros(self.num_manholes, dtype=bool)
+
+        self.is_true_outfall = np.array([
+            (len(self.outgoing_pipes[u]) == 0 and is_boundary[u])
+            for u in range(self.num_manholes)
+        ], dtype=bool)
+
         self._compute_effective_capacities()
 
     def _compute_effective_capacities(self):
@@ -106,7 +130,15 @@ class VectorizedSimulationEngine:
 
             out_pipes = self.outgoing_pipes[u]
             if len(out_pipes) == 0:
-                continue  # Free terminal outfall
+                if self.is_true_outfall[u]:
+                    # Legitimate boundary outfall: free terminal discharge out of domain
+                    continue
+                else:
+                    # Interior dead-end junction: 100% of subsurface inflow surcharges onto host surface cell
+                    overflow_vols[u] += inflow
+                    host_c = self.manhole_host_cell[u]
+                    self.surface_depths[host_c] += inflow / self.cell_effective_areas_m2[host_c]
+                    continue
 
             total_out_cap = self.manhole_total_out_cap[u]
             max_out_vol = total_out_cap * dt

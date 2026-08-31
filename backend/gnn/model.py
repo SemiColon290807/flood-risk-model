@@ -29,44 +29,30 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.nn import GCNConv
 
-# Explicit shared schema contract for node features (8 features)
+# Explicit shared schema contract for node features (9 features)
 NODE_FEATURE_NAMES: List[str] = [
-    "depth_m",              # [0] Current standing water depth on host cell (m)
-    "pipe_stored_vol_m3",   # [1] Current surcharged overflow / stored volume (m³)
+    "depth_m",              # [0] Current standing water depth on host cell (m) [log1p transformed]
+    "pipe_stored_vol_m3",   # [1] Current surcharged overflow / stored volume (m³) [log1p transformed]
     "rainfall_rate_mm_hr",  # [2] Instantaneous rainfall intensity (mm/hr)
     "elevation_m",          # [3] Ground DEM elevation at junction (m)
     "building_fraction",    # [4] Host cell building fraction / imperviousness [0, 1]
     "blockage_pct",         # [5] Pipe blockage percentage [0, 1]
     "catchment_area_m2",    # [6] Host cell effective open catchment area (m²)
-    "cum_rain_mm",          # [7] Cumulative storm rainfall depth so far (mm)
+    "cum_rain_mm",          # [7] Cumulative storm rainfall depth so far (mm) [log1p transformed]
+    "ema_rain_mm_hr",       # [8] Exponential moving average of rain intensity (decaying memory) (mm/hr)
 ]
 NUM_NODE_FEATURES: int = len(NODE_FEATURE_NAMES)
 
 
 class FloodGCN(nn.Module):
     """
-    Plain stacked-GCNConv surrogate model.
+    Plain stacked-GCNConv surrogate model with bounded output head.
 
     Architecture:
-        input (num_node_features)
+        input (9 features)
           -> GCNConv -> ReLU -> Dropout   (repeated num_layers - 1 times)
           -> GCNConv -> (no activation)   (final layer, projects to hidden_dim)
-          -> Linear                       (projects hidden_dim -> 1, the depth delta)
-
-    Notes on design choices:
-      - num_layers controls how many pipe-network "hops" of information
-        can reach a given node in one forward pass -- analogous to how many
-        steps of the simulator's downhill cascade (kinematic_sim.py Phase 3)
-        get folded into a single GNN prediction. Start small (2-3); a node
-        whose next-step depth depends on water many hops away is a sign the
-        *simulator's own* timestep is doing a lot of the propagation work,
-        which is expected -- the GNN doesn't need to re-derive global routing
-        every forward pass, just the local update.
-      - No attention / edge-conditioned convolution yet, per roadmap.
-      - Final Linear (not another GCNConv) projects to the scalar output --
-        keeps the very last step a simple per-node transformation rather
-        than another round of neighbor-mixing, which is a common pattern
-        for regression heads on top of GNN encoders.
+          -> Linear -> max_delta_cm * tanh(x)  (bounded regression head: +/- max_delta_cm per step)
     """
 
     def __init__(
@@ -75,6 +61,7 @@ class FloodGCN(nn.Module):
         hidden_dim: int = 64,
         num_layers: int = 3,
         dropout: float = 0.1,
+        max_delta_cm: float = 25.0,
     ):
         super().__init__()
 
@@ -82,13 +69,14 @@ class FloodGCN(nn.Module):
             raise ValueError("num_layers must be >= 2 (need at least one hidden GCN layer)")
 
         self.dropout = dropout
+        self.max_delta_cm = max_delta_cm
 
         self.convs = nn.ModuleList()
         self.convs.append(GCNConv(num_node_features, hidden_dim))
         for _ in range(num_layers - 1):
             self.convs.append(GCNConv(hidden_dim, hidden_dim))
 
-        # Regression head: hidden representation -> scalar depth delta per node
+        # Bounded regression head: hidden representation -> scalar depth delta per node
         self.output_head = nn.Linear(hidden_dim, 1)
 
     def forward(
@@ -105,7 +93,7 @@ class FloodGCN(nn.Module):
                           (e.g. effective, blockage-adjusted pipe capacity)
 
         Returns:
-            [num_nodes, 1] predicted depth delta per node (Δy = y_{t+1} - y_t)
+            [num_nodes, 1] predicted depth delta per node bounded in [-max_delta_cm, +max_delta_cm]
         """
         h = x
         for i, conv in enumerate(self.convs):
@@ -115,7 +103,8 @@ class FloodGCN(nn.Module):
                 h = F.relu(h)
                 h = F.dropout(h, p=self.dropout, training=self.training)
 
-        depth_delta = self.output_head(h)
+        raw_delta = self.output_head(h)
+        depth_delta = self.max_delta_cm * torch.tanh(raw_delta)
         return depth_delta
 
 
