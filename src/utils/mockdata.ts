@@ -6,7 +6,7 @@ export function getMockRoadFloodData(
   timestepIndex: number,
   blockedRoadIds: Set<string>
 ): RoadGeoJSON {
-  const factor = Math.sin((timestepIndex / 35) * Math.PI);
+  const factor = Math.sin((timestepIndex / 18) * Math.PI);
   const nodeById = Object.fromEntries(ROAD_NODES.map((n) => [n.id, n]));
 
   const features = ROAD_EDGES.map((edge, i) => {
@@ -22,6 +22,7 @@ export function getMockRoadFloodData(
         type: "LineString" as const,
         coordinates: [
           [from.lng, from.lat],
+          ...(edge.path ?? []),
           [to.lng, to.lat],
         ] as [number, number][],
       },
@@ -40,4 +41,4 @@ export function getMockRoadFloodData(
   });
 
   return { type: "FeatureCollection", features };
-}
+} 
