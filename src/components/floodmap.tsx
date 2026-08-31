@@ -20,23 +20,30 @@ export default function FloodMap({
 }: FloodMapProps) {
   const mapContainer = useRef<HTMLDivElement | null>(null);
   const mapInstance = useRef<maplibregl.Map | null>(null);
+  const isLoadedRef = useRef<boolean>(false);
 
+  // Initialize Map
   useEffect(() => {
     if (!mapContainer.current) return;
 
     const map = new maplibregl.Map({
       container: mapContainer.current,
-      style: "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
-      center: [88.371, 22.498],
-      zoom: 15,
+      style: "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",
+      center: [88.3715, 22.4988],
+      zoom: 14,
+      pitch: 30,
     });
 
     map.on("load", () => {
+      isLoadedRef.current = true;
+
+      // 1. Base Road Network Source
       map.addSource("roads", {
         type: "geojson",
-        data: getMockRoadFloodData(0, new Set()),
+        data: getMockRoadFloodData(timestep, blockedRoadIds),
       });
 
+      // Regular Flood Risk Layer
       map.addLayer({
         id: "roads-layer",
         type: "line",
@@ -57,6 +64,7 @@ export default function FloodMap({
         },
       });
 
+      // Blocked Overlay Layer (Dashed Dark Line)
       map.addLayer({
         id: "roads-blocked-layer",
         type: "line",
@@ -65,16 +73,37 @@ export default function FloodMap({
         layout: { "line-cap": "round", "line-join": "round" },
         paint: {
           "line-width": 6,
-          "line-color": "#111111",
+          "line-color": "#09090b",
           "line-dasharray": [1, 1.5],
         },
       });
 
+      // 2. Active Route Highlight Source & Layer
+      const initialRoadData = getMockRoadFloodData(timestep, blockedRoadIds);
+      const initialRouteFeatures = initialRoadData.features.filter((f) =>
+        routeEdgeIds.includes(f.properties.id)
+      );
+
       map.addSource("route", {
         type: "geojson",
-        data: { type: "FeatureCollection", features: [] },
+        data: { type: "FeatureCollection", features: initialRouteFeatures },
       });
 
+      // Route Glow Outline
+      map.addLayer({
+        id: "route-glow",
+        type: "line",
+        source: "route",
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-width": 10,
+          "line-color": "#38bdf8",
+          "line-opacity": 0.4,
+          "line-blur": 3,
+        },
+      });
+
+      // Route Core Line
       map.addLayer({
         id: "route-layer",
         type: "line",
@@ -82,11 +111,12 @@ export default function FloodMap({
         layout: { "line-cap": "round", "line-join": "round" },
         paint: {
           "line-width": 5,
-          "line-color": "#3b82f6",
-          "line-opacity": 0.95,
+          "line-color": "#60a5fa",
+          "line-opacity": 1,
         },
       });
 
+      // Interactivity
       map.on("click", "roads-layer", (e) => {
         if (!e.features || e.features.length === 0) return;
         onRoadClick(e.features[0].properties as RoadSegmentProperties);
@@ -95,30 +125,42 @@ export default function FloodMap({
       map.on("mouseenter", "roads-layer", () => {
         map.getCanvas().style.cursor = "pointer";
       });
+
       map.on("mouseleave", "roads-layer", () => {
         map.getCanvas().style.cursor = "";
       });
     });
 
     mapInstance.current = map;
-    (window as any).debugMap = map;
-    return () => map.remove();
+    return () => {
+      isLoadedRef.current = false;
+      map.remove();
+    };
   }, []);
 
+  // Update Road Network GeoJSON on Time / Blockage change
   useEffect(() => {
-    if (!mapInstance.current || !mapInstance.current.isStyleLoaded()) return;
-    const source = mapInstance.current.getSource("roads") as maplibregl.GeoJSONSource;
-    source?.setData(getMockRoadFloodData(timestep, blockedRoadIds));
+    if (!mapInstance.current || !isLoadedRef.current) return;
+    const source = mapInstance.current.getSource("roads") as maplibregl.GeoJSONSource | undefined;
+    if (source) {
+      source.setData(getMockRoadFloodData(timestep, blockedRoadIds));
+    }
   }, [timestep, blockedRoadIds]);
 
+  // Update Route GeoJSON on Route / Time change
   useEffect(() => {
-    if (!mapInstance.current || !mapInstance.current.isStyleLoaded()) return;
-    const roadData = getMockRoadFloodData(timestep, blockedRoadIds);
-    const routeFeatures = roadData.features.filter((f) =>
-      routeEdgeIds.includes(f.properties.id)
-    );
-    const routeSource = mapInstance.current.getSource("route") as maplibregl.GeoJSONSource;
-    routeSource?.setData({ type: "FeatureCollection", features: routeFeatures });
+    if (!mapInstance.current || !isLoadedRef.current) return;
+    const routeSource = mapInstance.current.getSource("route") as maplibregl.GeoJSONSource | undefined;
+    if (routeSource) {
+      const roadData = getMockRoadFloodData(timestep, blockedRoadIds);
+      const routeFeatures = roadData.features.filter((f) =>
+        routeEdgeIds.includes(f.properties.id)
+      );
+      routeSource.setData({
+        type: "FeatureCollection",
+        features: routeFeatures,
+      });
+    }
   }, [routeEdgeIds, timestep, blockedRoadIds]);
 
   return <div ref={mapContainer} className="absolute inset-0 w-full h-full" />;
