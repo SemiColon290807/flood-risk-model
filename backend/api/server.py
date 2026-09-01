@@ -53,6 +53,13 @@ def _load_graph_and_coords():
     graph = np.load(static_graph_path)
     STATE["edge_index"] = graph["edge_index"]     # [2, 14344]
     STATE["edge_weight"] = graph["edge_weight"]   # [14344]
+    STATE["elevations"] = graph["elevations"]     # [8001]
+    STATE["building_fracs"] = graph["building_fracs"] # [8001]
+    STATE["effective_areas"] = graph["effective_areas"] # [8001]
+    
+    # Calculate connected pipes per node
+    degrees = np.bincount(graph["edge_index"][0], minlength=8001) + np.bincount(graph["edge_index"][1], minlength=8001)
+    STATE["node_degrees"] = degrees
 
     # Extract exact OSM intersection node coordinates
     roads_json_path = DATA_DIR / "roads_ju.json"
@@ -212,20 +219,22 @@ def list_scenarios():
         scenarios.append({
             "id": "historical_sept_2025",
             "name": "Kolkata Cloudburst (Sept 2025)",
+            "category": "Historical Storm",
+            "description": "High-intensity 98mm/hr cloudburst inundating Jadavpur & Southern Kolkata.",
             "timesteps": sc["T"],
             "duration_hours": round(sc["T"] * 30.0 / 3600.0, 1),
-            "step_sec": 30.0,
-            "peak_intensity_mm_hr": float(np.max(sc["rainfall_mm_hr"]))
+            "peak_intensity_mm_hr": round(float(np.max(sc["rainfall_mm_hr"])), 1),
         })
     if (SCENARIOS_DIR / "historical_2021.npz").exists():
         sc = _load_scenario("historical_2021")
         scenarios.append({
             "id": "historical_2021",
-            "name": "Cyclone Yaas Inundation (2021)",
+            "name": "Cyclone Yaas Inundation (May 2021)",
+            "category": "Historical Storm",
+            "description": "Severe cyclonic depression causing prolonged tidal-monsoon urban flooding.",
             "timesteps": sc["T"],
             "duration_hours": round(sc["T"] * 30.0 / 3600.0, 1),
-            "step_sec": 30.0,
-            "peak_intensity_mm_hr": float(np.max(sc["rainfall_mm_hr"]))
+            "peak_intensity_mm_hr": round(float(np.max(sc["rainfall_mm_hr"])), 1),
         })
     return {"scenarios": scenarios}
 
@@ -320,6 +329,86 @@ def get_flood_state(
             "total_edges": len(features),
             "max_depth_cm": round(float(np.max(depths_node_cm)), 1),
             "flooded_edges_count": sum(1 for f in features if f["properties"]["flooding_type"] != "safe")
+        },
+        "features": features
+    }
+
+
+@app.get("/manholes")
+def get_manholes_state(
+    scenario_id: str = Query("historical_sept_2025", description="Scenario ID"),
+    timestep: int = Query(0, ge=0),
+    slider_step: Optional[int] = Query(None, ge=0),
+    slider_max: int = Query(18, ge=1)
+):
+    """
+    Returns full GeoJSON FeatureCollection of all 8,001 drainage manhole nodes
+    with elevation, catchment area, building coverage, water depth, and surcharge status.
+    """
+    sc = _load_scenario(scenario_id)
+    T = sc["T"]
+    if slider_step is not None:
+        sim_t = min(int(round(slider_step * (T - 1) / float(slider_max))), T - 1)
+    else:
+        sim_t = min(timestep, T - 1)
+
+    node_coords = STATE["node_coords"]
+    depth_m = sc["depth_m"][sim_t]
+    stored_vol = sc["stored_vol_m3"][sim_t]
+    elevs = STATE["elevations"]
+    bldg = STATE["building_fracs"]
+    areas = STATE["effective_areas"]
+    degrees = STATE["node_degrees"]
+
+    features = []
+    for u in range(8001):
+        d_cm = round(float(depth_m[u]) * 100.0, 1)
+        vol_m3 = round(float(stored_vol[u]), 2)
+        elev_m = round(float(elevs[u]), 2)
+        bldg_pct = round(float(bldg[u]) * 100.0, 1)
+        area_m2 = round(float(areas[u]), 1)
+        deg = int(degrees[u]) if degrees is not None else 2
+
+        if d_cm <= 0:
+            flood_type = "safe"
+            status = "Normal Flow"
+        elif d_cm <= 15:
+            flood_type = "caution"
+            status = "Inlet Ponding"
+        elif d_cm <= 30:
+            flood_type = "moderate"
+            status = "Surcharging Manhole"
+        else:
+            flood_type = "severe"
+            status = "Severe Surcharge Overflow"
+
+        lon, lat = node_coords[u]
+        features.append({
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [round(float(lon), 6), round(float(lat), 6)]
+            },
+            "properties": {
+                "id": f"N{u + 1}",
+                "node_idx": u,
+                "depth_cm": d_cm,
+                "flooding_type": flood_type,
+                "surcharge_status": status,
+                "stored_vol_m3": vol_m3,
+                "elevation_m": elev_m,
+                "building_pct": bldg_pct,
+                "effective_area_m2": area_m2,
+                "connected_pipes": deg
+            }
+        })
+
+    return {
+        "type": "FeatureCollection",
+        "metadata": {
+            "scenario_id": scenario_id,
+            "timestep": sim_t,
+            "total_manholes": 8001
         },
         "features": features
     }

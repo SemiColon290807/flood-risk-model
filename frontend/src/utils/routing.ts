@@ -1,5 +1,19 @@
 import { ROAD_NODES, ROAD_EDGES } from "../data/roadNetwork";
-import type { RoadGeoJSON, RouteMode } from "../types/flood";
+import type { RoadNode, RoadGeoJSON, RouteMode } from "../types/flood";
+
+export function findNearestNode(lng: number, lat: number): RoadNode {
+  let best = ROAD_NODES[0];
+  let bestDist = Infinity;
+  for (const n of ROAD_NODES) {
+    const d = (n.lng - lng) ** 2 + (n.lat - lat) ** 2;
+    if (d < bestDist) {
+      bestDist = d;
+      best = n;
+    }
+  }
+  return best;
+}
+
 function pathLength(coords: [number, number][]): number {
   let total = 0;
   for (let i = 0; i < coords.length - 1; i++) {
@@ -14,6 +28,55 @@ interface GraphEdge {
   id: string;
   to: string;
   weight: number;
+}
+
+class MinPriorityQueue {
+  private heap: { node: string; dist: number }[] = [];
+
+  push(node: string, dist: number) {
+    this.heap.push({ node, dist });
+    this._up(this.heap.length - 1);
+  }
+
+  pop(): { node: string; dist: number } | undefined {
+    if (this.heap.length === 0) return undefined;
+    const top = this.heap[0];
+    const bottom = this.heap.pop()!;
+    if (this.heap.length > 0) {
+      this.heap[0] = bottom;
+      this._down(0);
+    }
+    return top;
+  }
+
+  isEmpty(): boolean {
+    return this.heap.length === 0;
+  }
+
+  private _up(i: number) {
+    while (i > 0) {
+      const p = (i - 1) >> 1;
+      if (this.heap[i].dist < this.heap[p].dist) {
+        [this.heap[i], this.heap[p]] = [this.heap[p], this.heap[i]];
+        i = p;
+      } else break;
+    }
+  }
+
+  private _down(i: number) {
+    const len = this.heap.length;
+    while (true) {
+      let smallest = i;
+      const left = (i << 1) + 1;
+      const right = (i << 1) + 2;
+      if (left < len && this.heap[left].dist < this.heap[smallest].dist) smallest = left;
+      if (right < len && this.heap[right].dist < this.heap[smallest].dist) smallest = right;
+      if (smallest !== i) {
+        [this.heap[i], this.heap[smallest]] = [this.heap[smallest], this.heap[i]];
+        i = smallest;
+      } else break;
+    }
+  }
 }
 
 export function findSafeRoute(
@@ -37,11 +100,17 @@ export function findSafeRoute(
   ROAD_EDGES.forEach((edge) => {
     const info = infoByEdge[edge.id];
     if (!info || info.blocked) return;
-    if (mode === "vehicle" && info.depth > 30) return;
-        const fullPath: [number, number][] = [
-      [nodeById[edge.from].lng, nodeById[edge.from].lat],
+    if (mode === "vehicle" && info.depth > 30) return; // 30cm vehicle stall limit
+    if (mode === "pedestrian" && info.depth > 75) return; // 75cm dangerous wading limit
+
+    const fromNode = nodeById[edge.from];
+    const toNode = nodeById[edge.to];
+    if (!fromNode || !toNode) return;
+
+    const fullPath: [number, number][] = [
+      [fromNode.lng, fromNode.lat],
       ...(edge.path ?? []),
-      [nodeById[edge.to].lng, nodeById[edge.to].lat],
+      [toNode.lng, toNode.lat],
     ];
     const distanceWeight = pathLength(fullPath) * 100000;
     const weight = distanceWeight + info.depth * 10;
@@ -52,7 +121,6 @@ export function findSafeRoute(
   const dist: Record<string, number> = {};
   const prevNode: Record<string, string | null> = {};
   const prevEdge: Record<string, string | null> = {};
-  const visited = new Set<string>();
 
   ROAD_NODES.forEach((n) => {
     dist[n.id] = Infinity;
@@ -61,24 +129,22 @@ export function findSafeRoute(
   });
   dist[startNodeId] = 0;
 
-  while (visited.size < ROAD_NODES.length) {
-    let current: string | null = null;
-    let currentDist = Infinity;
-    for (const node of ROAD_NODES) {
-      if (!visited.has(node.id) && dist[node.id] < currentDist) {
-        current = node.id;
-        currentDist = dist[node.id];
-      }
-    }
-    if (current === null) break;
-    visited.add(current);
+  const pq = new MinPriorityQueue();
+  pq.push(startNodeId, 0);
 
-    for (const edge of graph[current]) {
-      const newDist = dist[current] + edge.weight;
+  while (!pq.isEmpty()) {
+    const top = pq.pop()!;
+    const u = top.node;
+    if (top.dist > dist[u]) continue;
+    if (u === endNodeId) break;
+
+    for (const edge of graph[u] || []) {
+      const newDist = dist[u] + edge.weight;
       if (newDist < dist[edge.to]) {
         dist[edge.to] = newDist;
-        prevNode[edge.to] = current;
+        prevNode[edge.to] = u;
         prevEdge[edge.to] = edge.id;
+        pq.push(edge.to, newDist);
       }
     }
   }

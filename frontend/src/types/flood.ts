@@ -38,3 +38,38 @@ export interface RoadEdge {
   to: string;
   path?: [number, number][];
 }
+
+export interface ScenarioInfo {
+  id: string;
+  name: string;
+  category?: string;
+  description?: string;
+  timesteps: number;
+  duration_hours: number;
+  peak_intensity_mm_hr: number;
+}
+
+export interface ManholeProperties {
+  id: string;
+  node_idx: number;
+  depth_cm: number;
+  flooding_type: FloodingType;
+  surcharge_status: string;
+  stored_vol_m3: number;
+  elevation_m: number;
+  building_pct: number;
+  effective_area_m2: number;
+  connected_pipes: number;
+}
+
+export interface ManholeGeoJSON {
+  type: "FeatureCollection";
+  features: {
+    type: "Feature";
+    geometry: {
+      type: "Point";
+      coordinates: [number, number];
+    };
+    properties: ManholeProperties;
+  }[];
+}

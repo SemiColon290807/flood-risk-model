@@ -9,7 +9,7 @@ interface NodePanelProps {
 
 export default function NodePanel({ node, onClose }: NodePanelProps) {
   return (
-    <div className="absolute bottom-6 left-6 z-20 w-80 rounded-xl bg-neutral-900 border border-neutral-800 p-4 text-neutral-100 shadow-xl backdrop-blur-md">
+    <div className="absolute bottom-6 right-6 z-30 w-80 rounded-xl bg-neutral-900/95 border border-neutral-800 p-4 text-neutral-100 shadow-2xl backdrop-blur-md transition-all animate-in fade-in slide-in-from-bottom-2">
       <div className="flex items-center justify-between mb-2">
         <div>
           <div className="text-sm font-bold">Road Segment {node.id}</div>
