@@ -1,5 +1,14 @@
 import { ROAD_NODES, ROAD_EDGES } from "../data/roadNetwork";
 import type { RoadGeoJSON, RouteMode } from "../types/flood";
+function pathLength(coords: [number, number][]): number {
+  let total = 0;
+  for (let i = 0; i < coords.length - 1; i++) {
+    const [lng1, lat1] = coords[i];
+    const [lng2, lat2] = coords[i + 1];
+    total += Math.sqrt((lng2 - lng1) ** 2 + (lat2 - lat1) ** 2);
+  }
+  return total;
+}
 
 interface GraphEdge {
   id: string;
@@ -21,6 +30,7 @@ export function findSafeRoute(
     };
   });
 
+  const nodeById = Object.fromEntries(ROAD_NODES.map((n) => [n.id, n]));
   const graph: Record<string, GraphEdge[]> = {};
   ROAD_NODES.forEach((n) => (graph[n.id] = []));
 
@@ -28,7 +38,13 @@ export function findSafeRoute(
     const info = infoByEdge[edge.id];
     if (!info || info.blocked) return;
     if (mode === "vehicle" && info.depth > 30) return;
-    const weight = info.depth + 1;
+        const fullPath: [number, number][] = [
+      [nodeById[edge.from].lng, nodeById[edge.from].lat],
+      ...(edge.path ?? []),
+      [nodeById[edge.to].lng, nodeById[edge.to].lat],
+    ];
+    const distanceWeight = pathLength(fullPath) * 100000;
+    const weight = distanceWeight + info.depth * 10;
     graph[edge.from].push({ id: edge.id, to: edge.to, weight });
     graph[edge.to].push({ id: edge.id, to: edge.from, weight });
   });

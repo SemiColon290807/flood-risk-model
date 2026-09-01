@@ -5,7 +5,7 @@ import TimeSlider from "./components/timeslider";
 import NodePanel from "./components/nodepanel";
 import RouteOverlay from "./components/routeoverlay";
 import BlockageControl from "./components/blockagecontrol";
-import { getMockRoadFloodData } from "./utils/mockdata";
+import { fetchRealRoadFloodData, getMockRoadFloodData } from "./utils/mockdata";
 import { findSafeRoute } from "./utils/routing";
 import type { RoadSegmentProperties, PriorityMode, RouteMode } from "./types/flood";
 
@@ -19,8 +19,8 @@ export default function App() {
   const [routeEdgeIds, setRouteEdgeIds] = useState<string[]>([]);
   const [routeFound, setRouteFound] = useState<boolean | null>(null);
 
-  const handleFindRoute = (start: string, end: string, mode: RouteMode) => {
-    const roadData = getMockRoadFloodData(timestep, blockedRoadIds);
+  const handleFindRoute = async (start: string, end: string, mode: RouteMode) => {
+    const roadData = await fetchRealRoadFloodData(timestep, blockedRoadIds);
     const result = findSafeRoute(roadData, start, end, mode);
     if (result) {
       setRouteEdgeIds(result.usedEdgeIds);

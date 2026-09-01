@@ -8,9 +8,12 @@ interface TimeSliderProps {
   setIsPlaying: (p: boolean) => void;
 }
 
+const STEP_MINUTES = 10;
+const MAX_STEP = 18; // 18 * 10 = 180 minutes = 3 hours
+
 export default function TimeSlider({ timestep, setTimestep, isPlaying, setIsPlaying }: TimeSliderProps) {
   const formatTime = (step: number) => {
-    const totalMinutes = step * 5;
+    const totalMinutes = step * STEP_MINUTES;
     const hours = Math.floor(totalMinutes / 60);
     const mins = totalMinutes % 60;
     return `+${hours}h ${mins.toString().padStart(2, "0")}m`;
@@ -19,13 +22,13 @@ export default function TimeSlider({ timestep, setTimestep, isPlaying, setIsPlay
   useEffect(() => {
     if (!isPlaying) return;
     const timer = window.setInterval(() => {
-      setTimestep((prev) => (prev >= 35 ? 0 : prev + 1));
+      setTimestep((prev) => (prev >= MAX_STEP ? 0 : prev + 1));
     }, 500);
     return () => clearInterval(timer);
   }, [isPlaying]);
 
   return (
-    <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-10 w-[90%] max-w-2xl bg-neutral-900/95 backdrop-blur-md border border-neutral-800 rounded-2xl p-4 shadow-2xl">
+    <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-10 w-[90%] max-w-2xl bg-neutral-900/95 backdrop-blur-md border border-neutral-800 rounded-2xl p-4">
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <button
@@ -49,7 +52,7 @@ export default function TimeSlider({ timestep, setTimestep, isPlaying, setIsPlay
       <input
         type="range"
         min="0"
-        max="35"
+        max={MAX_STEP}
         step="1"
         value={timestep}
         onChange={(e) => setTimestep(() => Number(e.target.value))}
@@ -62,4 +65,4 @@ export default function TimeSlider({ timestep, setTimestep, isPlaying, setIsPlay
       </div>
     </div>
   );
-} 
+}

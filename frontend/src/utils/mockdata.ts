@@ -2,11 +2,49 @@ import { ROAD_NODES, ROAD_EDGES } from "../data/roadNetwork";
 import { getFloodingType } from "./waterDepthLabel";
 import type { RoadGeoJSON } from "../types/flood";
 
+const API_BASE = "http://localhost:8000";
+const cachedData: Record<number, RoadGeoJSON> = {};
+
+export async function fetchRealRoadFloodData(
+  timestepIndex: number,
+  blockedRoadIds: Set<string>
+): Promise<RoadGeoJSON> {
+  try {
+    const res = await fetch(
+      `${API_BASE}/flood-state?scenario_id=historical_sept_2025&slider_step=${timestepIndex}&slider_max=18`
+    );
+    if (!res.ok) throw new Error(`API returned ${res.status}`);
+    const data: RoadGeoJSON = await res.json();
+    if (blockedRoadIds && blockedRoadIds.size > 0) {
+      data.features.forEach((f) => {
+        if (blockedRoadIds.has(f.properties.id)) {
+          f.properties.blocked = true;
+        }
+      });
+    }
+    cachedData[timestepIndex] = data;
+    return data;
+  } catch (err) {
+    console.warn("Backend offline or unreachable, falling back to local model:", err);
+    return getMockRoadFloodData(timestepIndex, blockedRoadIds);
+  }
+}
+
 export function getMockRoadFloodData(
   timestepIndex: number,
   blockedRoadIds: Set<string>
 ): RoadGeoJSON {
-  const factor = Math.sin((timestepIndex / 35) * Math.PI);
+  if (cachedData[timestepIndex]) {
+    const data = cachedData[timestepIndex];
+    if (blockedRoadIds && blockedRoadIds.size > 0) {
+      data.features.forEach((f) => {
+        f.properties.blocked = blockedRoadIds.has(f.properties.id);
+      });
+    }
+    return data;
+  }
+
+  const factor = Math.sin((timestepIndex / 18) * Math.PI);
   const nodeById = Object.fromEntries(ROAD_NODES.map((n) => [n.id, n]));
 
   const features = ROAD_EDGES.map((edge, i) => {
@@ -22,6 +60,7 @@ export function getMockRoadFloodData(
         type: "LineString" as const,
         coordinates: [
           [from.lng, from.lat],
+          ...(edge.path ?? []),
           [to.lng, to.lat],
         ] as [number, number][],
       },
@@ -40,4 +79,4 @@ export function getMockRoadFloodData(
   });
 
   return { type: "FeatureCollection", features };
-}
+} 

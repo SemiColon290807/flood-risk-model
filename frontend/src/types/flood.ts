@@ -36,4 +36,5 @@ export interface RoadEdge {
   id: string;
   from: string;
   to: string;
+  path?: [number, number][];
 }
