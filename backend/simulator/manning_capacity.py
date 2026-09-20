@@ -21,7 +21,7 @@ def compute_pipe_capacity(diameters, slopes, roughnesses=0.017, min_slope=1e-4):
     slopes_safe = np.maximum(slopes, min_slope)
 
     capacity = (1.0 / roughnesses) * area * (hydraulic_radius ** (2.0 / 3.0)) * np.sqrt(slopes_safe)
-    return capacity
+    return capacity 
 
 #Keeping in mind the condition of maintainence of the Indian Drainage system in general, We make a conservative estimate of the Manning's coefficient for a concrete pipe.
 

@@ -34,7 +34,7 @@ export default function BlockageControl({
     return (
       <button
         onClick={() => setIsCollapsed(false)}
-        className="absolute top-16 right-6 z-20 px-3.5 py-2 rounded-xl bg-neutral-900/90 hover:bg-neutral-800 border border-neutral-800 text-neutral-200 shadow-xl backdrop-blur-md text-xs font-semibold flex items-center gap-2 transition-all hover:scale-105"
+        className="absolute top-[74px] right-6 z-20 px-3.5 py-2 rounded-xl bg-neutral-900/90 hover:bg-neutral-800 border border-neutral-800 text-neutral-200 shadow-xl backdrop-blur-md text-xs font-semibold flex items-center gap-2 transition-all hover:scale-105"
         title="Open Admin Road Blockage Controls"
       >
         <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
@@ -49,7 +49,7 @@ export default function BlockageControl({
   }
 
   return (
-    <div className="absolute top-16 right-6 z-20 w-72 rounded-xl bg-neutral-900/95 border border-neutral-800 p-4 text-neutral-100 shadow-2xl backdrop-blur-md transition-all">
+    <div className="absolute top-[74px] right-6 z-20 w-72 rounded-xl bg-neutral-900/95 border border-neutral-800 p-4 text-neutral-100 shadow-2xl backdrop-blur-md transition-all">
       <div className="flex items-center justify-between mb-3">
         <div className="text-sm font-bold flex items-center gap-2">
           <span className="w-2 h-2 rounded-full bg-red-500" />

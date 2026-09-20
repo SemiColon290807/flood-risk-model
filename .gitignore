@@ -45,6 +45,9 @@ backend/data/scenarios/*.npz
 !backend/data/scenarios/historical_2021.npz
 !backend/data/static_graph.npz
 
+# Documentation / Context
+PROJECT_CONTEXT.md
+
 # Scratch / diagnostic test scripts
 diag_inv_*.py
 test_min*.py

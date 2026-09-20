@@ -104,6 +104,7 @@ def _load_overpass_roads(path=None):
 
 
 # ───────────────────────────────────────────────────────────────────────
+
 # 3.  Build topology: intersections (manholes) = graph nodes,
 #     road segments between intersections = pipe edges
 # ───────────────────────────────────────────────────────────────────────
