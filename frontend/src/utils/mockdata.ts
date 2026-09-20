@@ -2,7 +2,7 @@ import { ROAD_NODES, ROAD_EDGES } from "../data/roadNetwork";
 import { getFloodingType } from "./waterDepthLabel";
 import type { RoadGeoJSON, ScenarioInfo, ManholeGeoJSON } from "../types/flood";
 
-const API_BASE = "http://localhost:8000";
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 const cachedData: Record<string, RoadGeoJSON> = {};
 
 export async function fetchAvailableScenarios(): Promise<ScenarioInfo[]> {
