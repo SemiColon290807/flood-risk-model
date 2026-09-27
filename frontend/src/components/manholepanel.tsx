@@ -1,4 +1,4 @@
-import { X, ArrowRight, CircleDot } from "lucide-react";
+import { X, CircleDot } from "lucide-react";
 import type { ManholeProperties } from "../types/flood";
 
 interface ManholePanelProps {

@@ -1,6 +1,6 @@
 import type { RouteMode } from "../types/flood";
 
-export const LANDMARK_PRESETS = [
+const LANDMARK_PRESETS = [
   { name: "🎓 Jadavpur University Main Campus", nodeId: "N7262" },
   { name: "🚌 8B Bus Stand Terminus", nodeId: "N4086" },
   { name: "🏥 KPC Medical College & Hospital", nodeId: "N4613" },
@@ -39,12 +39,6 @@ export default function RouteOverlay({
   onFindRoute,
   routeFound,
 }: RouteOverlayProps) {
-  const getLandmarkName = (id: string | null) => {
-    if (!id) return "None selected";
-    const found = LANDMARK_PRESETS.find((p) => p.nodeId === id);
-    return found ? found.name : `Node ${id}`;
-  };
-
   return (
     <div className="absolute top-24 left-6 z-20 w-80 rounded-xl bg-neutral-900/95 border border-neutral-800 p-4 text-neutral-100 shadow-2xl backdrop-blur-md">
       <div className="flex items-center justify-between mb-3">

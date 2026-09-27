@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import * as maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
+import type GeoJSON from "geojson";
 import type { RoadSegmentProperties, ManholeProperties } from "../types/flood";
 import { fetchRealRoadFloodData, fetchRealManholesData } from "../utils/mockdata";
 import { FLOOD_COLORS } from "../utils/waterDepthLabel";
@@ -64,16 +65,16 @@ export default function FloodMap({
 
   // Latest callback refs to prevent stale closure bugs
   const onMapClickLocationRef = useRef(onMapClickLocation);
-  onMapClickLocationRef.current = onMapClickLocation;
-
   const isPickingRouteRef = useRef(isPickingRoute);
-  isPickingRouteRef.current = isPickingRoute;
-
   const onRoadClickRef = useRef(onRoadClick);
-  onRoadClickRef.current = onRoadClick;
-
   const onManholeClickRef = useRef(onManholeClick);
-  onManholeClickRef.current = onManholeClick;
+
+  useEffect(() => {
+    onMapClickLocationRef.current = onMapClickLocation;
+    isPickingRouteRef.current = isPickingRoute;
+    onRoadClickRef.current = onRoadClick;
+    onManholeClickRef.current = onManholeClick;
+  });
 
   // Initialize Map
   useEffect(() => {
