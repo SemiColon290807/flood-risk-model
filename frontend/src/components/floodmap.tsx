@@ -7,6 +7,38 @@ import { fetchRealRoadFloodData, fetchRealManholesData } from "../utils/mockdata
 import { FLOOD_COLORS } from "../utils/waterDepthLabel";
 import { ROAD_NODES } from "../data/roadNetwork";
 
+const MAP_STYLE: maplibregl.StyleSpecification = {
+  version: 8,
+  glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
+  sources: {
+    "esri-dark-base": {
+      type: "raster",
+      tiles: [
+        "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+      ],
+      tileSize: 256,
+      attribution:
+        '&copy; <a href="https://www.esri.com/">Esri</a>, HERE, Garmin, &copy; OpenStreetMap contributors',
+    },
+    "esri-dark-ref": {
+      type: "raster",
+      tiles: [
+        "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}",
+      ],
+      tileSize: 256,
+    },
+  },
+  layers: [
+    {
+      id: "esri-dark-base-layer",
+      type: "raster",
+      source: "esri-dark-base",
+      minzoom: 0,
+      maxzoom: 19,
+    },
+  ],
+};
+
 function buildPinsGeoJSON(startNodeId?: string | null, endNodeId?: string | null): GeoJSON.FeatureCollection {
   const features: GeoJSON.Feature[] = [];
   if (startNodeId) {
@@ -82,7 +114,7 @@ export default function FloodMap({
 
     const map = new maplibregl.Map({
       container: mapContainer.current,
-      style: "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
+      style: MAP_STYLE,
       center: [88.3715, 22.4988],
       zoom: 14.0,
       minZoom: 13.0,
@@ -94,74 +126,83 @@ export default function FloodMap({
       pitch: 20,
     });
 
+    // Ensure map takes full container dimensions
+    requestAnimationFrame(() => map.resize());
+    const resizeTimer = setTimeout(() => map.resize(), 200);
+
     map.on("load", async () => {
-      isLoadedRef.current = true;
+      console.log("[FloodMap] map 'load' event fired!");
+      map.resize();
+      try {
+        isLoadedRef.current = true;
 
-      // 1. Base Road Network Source
-      const initialRoadData = await fetchRealRoadFloodData(timestep, blockedRoadIds, scenarioId);
+        // 1. Base Road Network Source
+        const initialRoadData = await fetchRealRoadFloodData(timestep, blockedRoadIds, scenarioId);
+        console.log("[FloodMap] initialRoadData features:", initialRoadData.features.length);
 
-      map.addSource("roads", {
-        type: "geojson",
-        data: initialRoadData,
-      });
+        map.addSource("roads", {
+          type: "geojson",
+          data: initialRoadData,
+        });
 
-      // Subtle White Casing Underlay to keep road edges crisp on light map
-      map.addLayer({
-        id: "roads-casing",
-        type: "line",
-        source: "roads",
-        layout: { "line-cap": "round", "line-join": "round" },
-        paint: {
-          "line-width": [
-            "interpolate",
-            ["linear"],
-            ["zoom"],
-            13, 2.2,
-            14, 3.4,
-            16, 5.2,
-            18, 7.8,
-          ],
-          "line-color": "#ffffff",
-          "line-opacity": 0.8,
-        },
-      });
+        // Road Casing (crisp contrast against dark basemap)
+        map.addLayer({
+          id: "roads-casing",
+          type: "line",
+          source: "roads",
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: {
+            "line-width": [
+              "interpolate",
+              ["linear"],
+              ["zoom"],
+              13, 3.0,
+              14, 4.5,
+              16, 7.0,
+              18, 10.0,
+            ],
+            "line-color": "#020617",
+            "line-opacity": 0.7,
+          },
+        });
 
-      // Regular Flood Risk Layer (Dynamic Line-Width & Severity Opacity)
-      map.addLayer({
-        id: "roads-layer",
-        type: "line",
-        source: "roads",
-        layout: { "line-cap": "round", "line-join": "round" },
-        paint: {
-          "line-width": [
-            "interpolate",
-            ["linear"],
-            ["zoom"],
-            13, 1.4,
-            14, 2.2,
-            16, 3.8,
-            18, 6.0,
-          ],
-          "line-color": [
-            "match",
-            ["get", "flooding_type"],
-            "safe", FLOOD_COLORS.safe,
-            "caution", FLOOD_COLORS.caution,
-            "moderate", FLOOD_COLORS.moderate,
-            "severe", FLOOD_COLORS.severe,
-            "#999999",
-          ],
-          "line-opacity": [
-            "match",
-            ["get", "flooding_type"],
-            "safe", 0.72,
-            "caution", 0.90,
-            "moderate", 0.95,
-            "severe", 1.0,
-            0.72,
-          ],
-        },
-      });
+        // Regular Flood Risk Layer (Vibrant, high-contrast flood risk lines)
+        map.addLayer({
+          id: "roads-layer",
+          type: "line",
+          source: "roads",
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: {
+            "line-width": [
+              "interpolate",
+              ["linear"],
+              ["zoom"],
+              13, 2.0,
+              14, 3.2,
+              16, 5.2,
+              18, 7.8,
+            ],
+            "line-color": [
+              "match",
+              ["get", "flooding_type"],
+              "safe", FLOOD_COLORS.safe,
+              "caution", FLOOD_COLORS.caution,
+              "moderate", FLOOD_COLORS.moderate,
+              "severe", FLOOD_COLORS.severe,
+              "#38bdf8",
+            ],
+            "line-opacity": 0.95,
+          },
+        });
+
+        // Add ESRI Reference Labels layer above road network for readability
+        map.addLayer({
+          id: "esri-labels-layer",
+          type: "raster",
+          source: "esri-dark-ref",
+          minzoom: 0,
+          maxzoom: 19,
+        });
 
       // Blocked Overlay Layer (Dashed Dark Line)
       map.addLayer({
@@ -395,10 +436,21 @@ export default function FloodMap({
           map.getCanvas().style.cursor = "";
         }
       });
+
+      console.log("[FloodMap] All layers and sources loaded successfully!");
+    } catch (err) {
+      console.error("[FloodMap] Error in map load handler:", err);
+    }
+  });
+
+    map.on("error", (e) => {
+      console.error("[MapLibre error]", e);
     });
 
     mapInstance.current = map;
+    (window as any).__map = map;
     return () => {
+      clearTimeout(resizeTimer);
       isLoadedRef.current = false;
       map.remove();
     };
