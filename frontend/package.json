@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "prebuild": "node -e 'const fs=require(\"fs\"); fs.mkdirSync(\"public/assets\", {recursive: true}); fs.copyFileSync(\"node_modules/maplibre-gl/dist/maplibre-gl-worker.mjs\", \"public/assets/maplibre-gl-worker.mjs\"); fs.copyFileSync(\"node_modules/maplibre-gl/dist/maplibre-gl-shared.mjs\", \"public/assets/maplibre-gl-shared.mjs\");'",
+    "build": "npm run prebuild && tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview"
   },
