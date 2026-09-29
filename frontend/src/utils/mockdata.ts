@@ -2,10 +2,39 @@ import { ROAD_NODES, ROAD_EDGES } from "../data/roadNetwork";
 import { getFloodingType } from "./waterDepthLabel";
 import type { RoadGeoJSON, ScenarioInfo, ManholeGeoJSON } from "../types/flood";
 
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
+const isRemoteHttps =
+  typeof window !== "undefined" &&
+  window.location.protocol === "https:" &&
+  !import.meta.env.VITE_API_URL;
+
+const API_BASE = import.meta.env.VITE_API_URL || (isRemoteHttps ? "" : "http://localhost:8000");
 const cachedData: Record<string, RoadGeoJSON> = {};
 
+const FALLBACK_SCENARIOS: ScenarioInfo[] = [
+  {
+    id: "historical_sept_2025",
+    name: "Kolkata Cloudburst (Sept 2025)",
+    category: "Historical Storm",
+    description: "High-intensity 98mm/hr cloudburst inundating Jadavpur & Southern Kolkata.",
+    timesteps: 721,
+    duration_hours: 6.0,
+    peak_intensity_mm_hr: 98.0,
+  },
+  {
+    id: "historical_2021",
+    name: "Cyclone Yaas Inundation (May 2021)",
+    category: "Historical Storm",
+    description: "Severe cyclonic depression causing prolonged tidal-monsoon urban flooding.",
+    timesteps: 841,
+    duration_hours: 7.0,
+    peak_intensity_mm_hr: 98.0,
+  },
+];
+
 export async function fetchAvailableScenarios(): Promise<ScenarioInfo[]> {
+  if (!API_BASE) {
+    return FALLBACK_SCENARIOS;
+  }
   try {
     const res = await fetch(`${API_BASE}/scenarios`);
     if (!res.ok) throw new Error(`API error ${res.status}`);
@@ -13,26 +42,7 @@ export async function fetchAvailableScenarios(): Promise<ScenarioInfo[]> {
     return data.scenarios;
   } catch (err) {
     console.warn("Using fallback scenario definitions:", err);
-    return [
-      {
-        id: "historical_sept_2025",
-        name: "Kolkata Cloudburst (Sept 2025)",
-        category: "Historical Storm",
-        description: "High-intensity 98mm/hr cloudburst inundating Jadavpur & Southern Kolkata.",
-        timesteps: 721,
-        duration_hours: 6.0,
-        peak_intensity_mm_hr: 98.0,
-      },
-      {
-        id: "historical_2021",
-        name: "Cyclone Yaas Inundation (May 2021)",
-        category: "Historical Storm",
-        description: "Severe cyclonic depression causing prolonged tidal-monsoon urban flooding.",
-        timesteps: 841,
-        duration_hours: 7.0,
-        peak_intensity_mm_hr: 98.0,
-      },
-    ];
+    return FALLBACK_SCENARIOS;
   }
 }
 
@@ -42,6 +52,9 @@ export async function fetchRealRoadFloodData(
   scenarioId: string = "historical_sept_2025"
 ): Promise<RoadGeoJSON> {
   const cacheKey = `${scenarioId}_${timestepIndex}`;
+  if (!API_BASE) {
+    return getMockRoadFloodData(timestepIndex, blockedRoadIds);
+  }
   try {
     const res = await fetch(
       `${API_BASE}/flood-state?scenario_id=${scenarioId}&slider_step=${timestepIndex}&slider_max=18`
@@ -123,6 +136,11 @@ export async function fetchRealManholesData(
   const cacheKey = `${scenarioId}_${timestepIndex}`;
   if (cachedManholeData[cacheKey]) {
     return cachedManholeData[cacheKey];
+  }
+  if (!API_BASE) {
+    const data = getMockManholesData(timestepIndex);
+    cachedManholeData[cacheKey] = data;
+    return data;
   }
   try {
     const res = await fetch(

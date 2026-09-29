@@ -7,37 +7,7 @@ import { fetchRealRoadFloodData, fetchRealManholesData } from "../utils/mockdata
 import { FLOOD_COLORS } from "../utils/waterDepthLabel";
 import { ROAD_NODES } from "../data/roadNetwork";
 
-const MAP_STYLE: maplibregl.StyleSpecification = {
-  version: 8,
-  glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
-  sources: {
-    "esri-dark-base": {
-      type: "raster",
-      tiles: [
-        "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}",
-      ],
-      tileSize: 256,
-      attribution:
-        '&copy; <a href="https://www.esri.com/">Esri</a>, HERE, Garmin, &copy; OpenStreetMap contributors',
-    },
-    "esri-dark-ref": {
-      type: "raster",
-      tiles: [
-        "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}",
-      ],
-      tileSize: 256,
-    },
-  },
-  layers: [
-    {
-      id: "esri-dark-base-layer",
-      type: "raster",
-      source: "esri-dark-base",
-      minzoom: 0,
-      maxzoom: 19,
-    },
-  ],
-};
+const BASEMAP_STYLE = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
 
 function buildPinsGeoJSON(startNodeId?: string | null, endNodeId?: string | null): GeoJSON.FeatureCollection {
   const features: GeoJSON.Feature[] = [];
@@ -114,19 +84,22 @@ export default function FloodMap({
 
     const map = new maplibregl.Map({
       container: mapContainer.current,
-      style: MAP_STYLE,
+      style: BASEMAP_STYLE,
       center: [88.3715, 22.4988],
       zoom: 14.0,
-      minZoom: 13.0,
+      minZoom: 11.0,
       maxZoom: 18.0,
-      maxBounds: [
-        [88.320, 22.440], // Southwest boundary
-        [88.425, 22.560], // Northeast boundary
-      ],
       pitch: 20,
     });
 
-    // Ensure map takes full container dimensions
+    map.addControl(new maplibregl.NavigationControl({ showCompass: true }), "bottom-right");
+
+    // Ensure map takes full container dimensions across all viewport changes
+    const resizeObserver = new ResizeObserver(() => {
+      map.resize();
+    });
+    resizeObserver.observe(mapContainer.current);
+
     requestAnimationFrame(() => map.resize());
     const resizeTimer = setTimeout(() => map.resize(), 200);
 
@@ -195,14 +168,6 @@ export default function FloodMap({
           },
         });
 
-        // Add ESRI Reference Labels layer above road network for readability
-        map.addLayer({
-          id: "esri-labels-layer",
-          type: "raster",
-          source: "esri-dark-ref",
-          minzoom: 0,
-          maxzoom: 19,
-        });
 
       // Blocked Overlay Layer (Dashed Dark Line)
       map.addLayer({
@@ -450,6 +415,7 @@ export default function FloodMap({
     mapInstance.current = map;
     (window as any).__map = map;
     return () => {
+      resizeObserver.disconnect();
       clearTimeout(resizeTimer);
       isLoadedRef.current = false;
       map.remove();
